@@ -1,218 +1,300 @@
 package main
 
 import (
-    "encoding/json"
-    "fmt"
-    "io"
-    "log"
-    "net/http"
-    "time"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"time"
 )
 
 const (
-    baseURL      = "https://www.stoloto.ru/p/api/mobile/api/v35"
-    partnerToken = "bXMjXFRXZ3coWXh6R3s1NTdUX3dnWlBMLUxmdg"
-    userAgent    = "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15"
+	baseURL      = "https://www.stoloto.ru/p/api/mobile/api/v35"
+	partnerToken = "bXMjXFRXZ3coWXh6R3s1NTdUX3dnWlBMLUxmdg"
+	userAgent    = "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15"
 )
 
-// Структуры для парсинга ответа от games/info-new
-type GamesResponse struct {
-    Success bool          `json:"success"`
-    Data    []GameData    `json:"data"`
-}
-
-type GameData struct {
-    Name  string `json:"name"`
-    Draws []Draw `json:"draws"`
-}
-
-type Draw struct {
-    Number int `json:"number"`
-}
-
 func main() {
-    // Старые endpoints (СОХРАНЕНЫ!)
-    http.Handle("/api/draws/", logMiddleware(http.HandlerFunc(handleDraws)))
-    http.Handle("/api/draw", logMiddleware(http.HandlerFunc(handleDraw)))
-    
-    // Новый endpoint для получения последнего розыгрыша
-    http.Handle("/api/draw/latest", logMiddleware(http.HandlerFunc(handleDrawLatest)))
-    
-    log.Println("Server starting on :8080")
-    log.Fatal(http.ListenAndServe(":8080", nil))
+	// Регистрируем handlers
+	http.HandleFunc("/api/draws/", handleDraws)
+	http.HandleFunc("/api/draw/", handleDraw)
+	http.HandleFunc("/api/draw/latest", handleDrawLatest)
+
+	log.Println("Server starting on :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-// СТАРЫЕ ФУНКЦИИ (СОХРАНЕНЫ!)
+// ФУНКЦИЯ ДЛЯ API - принимает name и number
+func handleDrawHandle(name, number string) (*http.Response, error) {
+	if name == "" || number == "" {
+		return nil, fmt.Errorf(`missing required parameters: "name" and "number"`)
+	}
+
+	url := fmt.Sprintf("/service/draws/%s/%s", name, number)
+	resp, err := makeAPIRequest(url)
+	if err != nil {
+		return nil, fmt.Errorf("error making API request: %w", err)
+	}
+
+	return resp, nil
+}
+
+// ФУНКЦИЯ ДЛЯ API - ничего не принимает
+func handleDrawsHandle() (*http.Response, error) {
+	resp, err := makeAPIRequest("/service/games/info-new")
+	if err != nil {
+		return nil, fmt.Errorf("error making API request: %w", err)
+	}
+
+	return resp, nil
+}
+
+// ОБРАБОТЧИКИ HTTP
 
 func handleDraws(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodGet {
+		sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-    resp, err := makeAPIRequest("/service/games/info-new")
-    if err != nil {
-        sendError(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer resp.Body.Close()
+	resp, err := handleDrawsHandle()
+	if err != nil {
+		sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
 
-    forwardResponse(w, resp)
+	forwardResponse(w, resp)
 }
 
 func handleDraw(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodGet {
+		sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-    name := r.URL.Query().Get("name")
-    number := r.URL.Query().Get("number")
+	// Извлекаем параметры из query string
+	query := r.URL.Query()
+	name := query.Get("name")
+	number := query.Get("number")
 
-    if name == "" || number == "" {
-        sendError(w, `Missing required parameters: "name" and "number"`, http.StatusBadRequest)
-        return
-    }
+	resp, err := handleDrawHandle(name, number)
+	if err != nil {
+		sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer resp.Body.Close()
 
-    url := fmt.Sprintf("/service/draws/%s/%s", name, number)
-    resp, err := makeAPIRequest(url)
-    if err != nil {
-        sendError(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer resp.Body.Close()
-
-    forwardResponse(w, resp)
+	forwardResponse(w, resp)
 }
 
-// НОВАЯ ФУНКЦИЯ для /api/draw/latest?name={name}
+// Функция для /api/draw/latest?name={name}
 func handleDrawLatest(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodGet {
-        sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodGet {
+		sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-    name := r.URL.Query().Get("name")
-    if name == "" {
-        sendError(w, `Missing required parameter: "name"`, http.StatusBadRequest)
-        return
-    }
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		sendError(w, `Missing required parameter: "name"`, http.StatusBadRequest)
+		return
+	}
 
-    // 1. Делаем запрос к games/info-new чтобы получить список игр
-    gamesResp, err := makeAPIRequest("/service/games/info-new")
-    if err != nil {
-        sendError(w, "Error fetching games list: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer gamesResp.Body.Close()
+	log.Printf("Searching for latest draw of game: %s", name)
 
-    // 2. Парсим ответ и ищем нужную игру по name
-    var gamesData GamesResponse
-    body, err := io.ReadAll(gamesResp.Body)
-    if err != nil {
-        sendError(w, "Error reading games response: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
+	// 1. Получаем список игр через handleDrawsHandle
+	gamesResp, err := handleDrawsHandle()
+	if err != nil {
+		sendError(w, "Error fetching games list: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer gamesResp.Body.Close()
 
-    if err := json.Unmarshal(body, &gamesData); err != nil {
-        sendError(w, "Error parsing games data: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
+	// 2. Читаем весь ответ
+	body, err := io.ReadAll(gamesResp.Body)
+	if err != nil {
+		sendError(w, "Error reading games response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    if !gamesData.Success {
-        sendError(w, "External API returned error", http.StatusInternalServerError)
-        return
-    }
+	// 3. Парсим JSON в map
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Printf("JSON parse error: %v", err)
+		sendError(w, "Error parsing JSON response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    // 3. Ищем игру по имени
-    var targetGame *GameData
-    for _, game := range gamesData.Data {
-        if game.Name == name {
-            targetGame = &game
-            break
-        }
-    }
+	// 4. Проверяем requestStatus поле вместо success
+	requestStatus, ok := result["requestStatus"].(string)
+	if !ok || requestStatus != "success" {
+		log.Printf("API returned requestStatus not 'success': %v", result)
+		sendError(w, "External API returned error", http.StatusInternalServerError)
+		return
+	}
 
-    if targetGame == nil {
-        sendError(w, fmt.Sprintf("Game with name '%s' not found", name), http.StatusNotFound)
-        return
-    }
+	// 5. Извлекаем games поле
+	games, ok := result["games"]
+	if !ok {
+		log.Printf("Missing 'games' field in response: %v", result)
+		sendError(w, "Invalid API response format: missing games", http.StatusInternalServerError)
+		return
+	}
 
-    if len(targetGame.Draws) == 0 {
-        sendError(w, fmt.Sprintf("No draws found for game '%s'", name), http.StatusNotFound)
-        return
-    }
+	// 6. Преобразуем games в массив
+	gamesArray, ok := games.([]interface{})
+	if !ok {
+		log.Printf("Games field is not an array: %T %v", games, games)
+		sendError(w, "Invalid API response format: games is not array", http.StatusInternalServerError)
+		return
+	}
 
-    // 4. Берем первый (последний) номер розыгрыша
-    latestNumber := targetGame.Draws[0].Number
+	log.Printf("Found %d games in response", len(gamesArray))
 
-    // 5. Делаем запрос к API розыгрыша с полученным номером
-    drawURL := fmt.Sprintf("/service/draws/%s/%d", name, latestNumber)
-    drawResp, err := makeAPIRequest(drawURL)
-    if err != nil {
-        sendError(w, "Error fetching draw data: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer drawResp.Body.Close()
+	// 7. Ищем игру по имени
+	var latestNumber int
+	gameFound := false
 
-    // 6. Возвращаем данные розыгрыша
-    forwardResponse(w, drawResp)
+	for i, item := range gamesArray {
+		game, ok := item.(map[string]interface{})
+		if !ok {
+			log.Printf("Item %d is not a map: %T", i, item)
+			continue
+		}
+
+		gameName, ok := game["name"].(string)
+		if !ok {
+			log.Printf("Game %d has no name field", i)
+			continue
+		}
+
+		log.Printf("Checking game: %s", gameName)
+
+		if gameName == name {
+			gameFound = true
+
+			// Ищем последний розыгрыш - проверяем оба поля: draw и completedDraw
+			var latestDraw map[string]interface{}
+
+			// Сначала проверяем активный розыгрыш (draw)
+			if draw, exists := game["draw"]; exists && draw != nil {
+				if drawMap, ok := draw.(map[string]interface{}); ok {
+					latestDraw = drawMap
+					log.Printf("Using active draw for %s", name)
+				}
+			}
+
+			// Если нет активного, используем завершенный (completedDraw)
+			if latestDraw == nil {
+				if completedDraw, exists := game["completedDraw"]; exists && completedDraw != nil {
+					if completedDrawMap, ok := completedDraw.(map[string]interface{}); ok {
+						latestDraw = completedDrawMap
+						log.Printf("Using completed draw for %s", name)
+					}
+				}
+			}
+
+			if latestDraw == nil {
+				log.Printf("Game %s has no active or completed draws", name)
+				sendError(w, fmt.Sprintf("No draws found for game '%s'", name), http.StatusNotFound)
+				return
+			}
+
+			// Извлекаем number из найденного розыгрыша
+			number, ok := latestDraw["number"]
+			if !ok {
+				log.Printf("Draw has no number field: %v", latestDraw)
+				sendError(w, "Draw has no number", http.StatusInternalServerError)
+				return
+			}
+
+			// Конвертируем number в int (JSON numbers are float64)
+			switch n := number.(type) {
+			case float64:
+				latestNumber = int(n)
+			case int:
+				latestNumber = n
+			default:
+				log.Printf("Number has unexpected type: %T %v", number, number)
+				sendError(w, "Invalid number format", http.StatusInternalServerError)
+				return
+			}
+
+			log.Printf("Found latest draw number for %s: %d", name, latestNumber)
+			break
+		}
+	}
+
+	if !gameFound {
+		// Собираем список доступных игр для отладки
+		availableGames := make([]string, 0)
+		for _, item := range gamesArray {
+			if game, ok := item.(map[string]interface{}); ok {
+				if gameName, ok := game["name"].(string); ok {
+					availableGames = append(availableGames, gameName)
+				}
+			}
+		}
+		log.Printf("Game '%s' not found. Available games: %v", name, availableGames)
+		sendError(w, fmt.Sprintf("Game '%s' not found. Available games: %v", name, availableGames), http.StatusNotFound)
+		return
+	}
+
+	// 8. Получаем данные розыгрыша через handleDrawHandle
+	drawResp, err := handleDrawHandle(name, fmt.Sprintf("%d", latestNumber))
+	if err != nil {
+		sendError(w, "Error fetching draw data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer drawResp.Body.Close()
+
+	// 9. Возвращаем данные розыгрыша
+	forwardResponse(w, drawResp)
 }
 
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (СОХРАНЕНЫ!)
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 
 func makeAPIRequest(endpoint string) (*http.Response, error) {
-    req, err := http.NewRequest("GET", baseURL+endpoint, nil)
-    if err != nil {
-        return nil, fmt.Errorf("error creating request: %w", err)
-    }
+	req, err := http.NewRequest("GET", baseURL+endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
 
-    setHeaders(req)
+	setHeaders(req)
 
-    client := &http.Client{Timeout: 30 * time.Second}
-    resp, err := client.Do(req)
-    if err != nil {
-        return nil, fmt.Errorf("error making request: %w", err)
-    }
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %w", err)
+	}
 
-    return resp, nil
+	return resp, nil
 }
 
 func setHeaders(req *http.Request) {
-    req.Header.Set("Gosloto-Partner", partnerToken)
-    req.Header.Set("User-Agent", userAgent)
-    req.Header.Set("Accept", "application/json")
+	req.Header.Set("Gosloto-Partner", partnerToken)
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "application/json")
 }
 
 func forwardResponse(w http.ResponseWriter, resp *http.Response) {
-    // Копируем заголовки
-    for key, values := range resp.Header {
-        for _, value := range values {
-            w.Header().Add(key, value)
-        }
-    }
-    
-    w.WriteHeader(resp.StatusCode)
-    io.Copy(w, resp.Body)
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func sendError(w http.ResponseWriter, message string, statusCode int) {
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(statusCode)
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "error":   message,
-        "success": false,
-    })
-}
-
-// Middleware для логирования
-func logMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        start := time.Now()
-        log.Printf("Started %s %s", r.Method, r.URL.String())
-        
-        next.ServeHTTP(w, r)
-        
-        log.Printf("Completed %s %s in %v", r.Method, r.URL.String(), time.Since(start))
-    })
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"error":   message,
+		"success": false,
+	})
 }
