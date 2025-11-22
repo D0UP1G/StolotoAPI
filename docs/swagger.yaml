@@ -1,0 +1,150 @@
+basePath: /
+definitions:
+  main.ErrorResponse:
+    properties:
+      error:
+        type: string
+      success:
+        type: boolean
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Прокси-сервер для API Stoloto
+  title: Stoloto API Proxy
+  version: "1.0"
+paths:
+  /api/draw/:
+    get:
+      description: Возвращает данные о конкретном розыгрыше по имени игры и номеру
+      parameters:
+      - description: 'Название игры (например: 5x36, 6x45)'
+        in: query
+        name: name
+        required: true
+        type: string
+      - description: Номер розыгрыша
+        in: query
+        name: number
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Успешный ответ
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Неверные параметры
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Ошибка сервера
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Получить информацию о конкретном розыгрыше
+      tags:
+      - draws
+  /api/draw/latest:
+    get:
+      description: Возвращает данные последнего розыгрыша для указанной игры
+      parameters:
+      - description: 'Название игры (например: 5x36, 6x45)'
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Успешный ответ
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Не указано имя игры
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "404":
+          description: Игра не найдена
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Ошибка сервера
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Получить последний розыгрыш для игры
+      tags:
+      - draws
+  /api/draw/momental:
+    get:
+      description: Возвращает информацию о всех моментальных играх
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Успешный ответ
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Ошибка сервера
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Получить список всех моментальных
+      tags:
+      - draws
+  /api/draw/prelatest:
+    get:
+      description: Возвращает данные последнего розыгрыша для указанной игры
+      parameters:
+      - description: 'Название игры (например: 5x36, 6x45)'
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Успешный ответ
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Не указано имя игры
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "404":
+          description: Игра не найдена
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Ошибка сервера
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Получить предпоследний розыгрыш для игры
+      tags:
+      - draws
+  /api/draws/:
+    get:
+      description: Возвращает информацию о всех доступных играх
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Успешный ответ
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Ошибка сервера
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Получить список всех игр
+      tags:
+      - draws
+swagger: "2.0"
