@@ -19,6 +19,8 @@ const (
 	userAgent    = "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15"
 )
 
+//Hello World!
+
 // @title Stoloto API Proxy
 // @version 1.0
 // @description Прокси-сервер для API Stoloto
